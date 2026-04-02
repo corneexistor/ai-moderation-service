@@ -1,0 +1,33 @@
+@echo off
+title Установка зависимостей Whisper GPU API
+echo ========================================
+echo 🚀 УСТАНОВКА ЗАВИСИМОСТЕЙ
+echo ========================================
+echo.
+
+echo 1. Обновление pip...
+python -m pip install --upgrade pip
+
+echo.
+echo 2. Установка PyTorch с CUDA (для GPU)...
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+echo.
+echo 3. Установка остальных зависимостей...
+pip install fastapi==0.104.1
+pip install "uvicorn[standard]==0.24.0"
+pip install openai-whisper==20231117
+pip install ffmpeg-python==0.2.0
+pip install numpy==1.24.3
+pip install python-multipart==0.0.6
+pip install aiofiles==23.2.1
+pip install python-dotenv==1.0.0
+
+echo.
+echo ========================================
+echo ✅ УСТАНОВКА ЗАВЕРШЕНА!
+echo ========================================
+echo.
+echo Запустите сервер командой: python main.py
+echo.
+pause
