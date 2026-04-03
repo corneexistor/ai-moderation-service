@@ -16,11 +16,13 @@ from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadF
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
 
 def setup_device() -> tuple[str, str, bool]:
     if torch.cuda.is_available():
@@ -62,35 +64,21 @@ class Config:
     DEFAULT_AUDIO_PREPROCESS = "none"
     NUM_WORKERS = 2 if DEVICE == "cuda" else 1
 
-    LANGUAGE_PROMPTS: dict[str, str] = {
-        "ru": (
-            "Это русская речь. Внимательно слушайте окончания слов, "
-            "правильно определяйте падежи и грамматические конструкции."
-        ),
-        "en": "This is English speech.",
-        "es": "Esta es una conversación en español.",
-        "fr": "Il s'agit d'un discours en français.",
-        "de": "Dies ist eine deutsche Rede.",
-        "zh": "这是中文语音。",
-        "ja": "これは日本語の音声です。",
-        "ko": "이것은 한국어 음성입니다.",
-    }
-
-    LANGUAGE_THRESHOLDS: dict[str, dict] = {
-        "ru": {"compression_ratio_threshold": 2.2},
-    }
-
 
 config = Config()
 
 logger.info("Загрузка модели %s на %s...", config.MODEL_SIZE.upper(), config.DEVICE.upper())
 
-model = whisper.load_model(config.MODEL_SIZE, device=config.DEVICE)
+whisper_model = whisper.load_model(
+    config.MODEL_SIZE,
+    device=config.DEVICE,
+    in_memory=True
+)
 
 if config.DEVICE == "cuda":
     if config.USE_FP16:
-        model = model.half()
-    model.eval()
+        whisper_model = whisper_model.half()
+    whisper_model.eval()
     torch.set_grad_enabled(False)
     torch.cuda.empty_cache()
 
@@ -103,7 +91,7 @@ logger.info("Модель загружена.")
 
 
 def _model_dtype() -> torch.dtype:
-    return next(model.parameters()).dtype
+    return next(whisper_model.parameters()).dtype
 
 
 def detect_language(file_path: str) -> Optional[str]:
@@ -113,7 +101,7 @@ def detect_language(file_path: str) -> Optional[str]:
 
         mel = whisper.log_mel_spectrogram(audio, device=config.DEVICE).to(dtype=_model_dtype())
 
-        _, probs = model.detect_language(mel)
+        _, probs = whisper_model.detect_language(mel = mel)
         lang = max(probs, key=probs.get)
         logger.info("Определён язык: %s (p=%.2f)", lang, probs[lang])
         return lang
@@ -127,35 +115,43 @@ def _confidence(segments: list) -> float:
     return float(np.mean(scores)) if scores else 0.0
 
 
-def _build_transcribe_options(lang: Optional[str], task: str = "transcribe") -> dict:
-    options: dict = {
-        "task":                        task,
-        "temperature":                 0.0,
-        "compression_ratio_threshold": 2.4,
-        "logprob_threshold":          -1.0,
-        "no_speech_threshold":         0.6,
-        "condition_on_previous_text":  True,
-        "word_timestamps":             True,
-        "fp16":                        config.USE_FP16,
-        "verbose":                     False,
-    }
+initial_options: dict = {
+    "task":                            "transcribe",
+    "beam_size":                       5,
+    "best_of":                         10,
+    "patience":                        2.0,
+
+    "temperature":                     (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9),
+
+    "compression_ratio_threshold":     2.6,
+    "logprob_threshold":               -1.5,
+    "no_speech_threshold":             0.6,
+
+    "hallucination_silence_threshold": 2.0,
+    "condition_on_previous_text":      False,
+
+    "word_timestamps":                 True,
+    "prepend_punctuations":             "\"'¿([{-",
+    "append_punctuations":              "\"'.。,，!！?？:：)]}、",
+                                            
+    "fp16":                            config.USE_FP16,
+    "verbose":                         False,
+}
+
+def _build_transcribe_options(lang: Optional[str]) -> dict:
+    options = initial_options
 
     if lang:
         options["language"] = lang
-        options["initial_prompt"] = config.LANGUAGE_PROMPTS.get(lang, "")
-        options.update(config.LANGUAGE_THRESHOLDS.get(lang, {}))
 
     return options
 
 
-def run_transcribe(file_path: str, language: Optional[str]) -> dict:
-    if language and language != "auto":
-        lang = language
-    else:
-        lang = detect_language(file_path)
-
+def run_transcribe(file_path: str) -> dict:
+    lang    = detect_language(file_path)
     options = _build_transcribe_options(lang)
-    result = model.transcribe(file_path, **options)
+
+    result = whisper_model.transcribe(file_path, **options)
 
     detected_language = result.get("language") or lang
     segments          = result.get("segments", [])
@@ -203,7 +199,6 @@ executor = ThreadPoolExecutor(max_workers=config.NUM_WORKERS)
 async def transcribe(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    language: Optional[str] = Form(None),
     return_timestamps: bool = Form(False),
 ):
     try:
@@ -221,14 +216,12 @@ async def transcribe(
 
         logger.info("Файл: %s (%.1f МБ)", file.filename, len(content) / 1024 / 1024)
 
-        logger.info("Распознавание [%s, %s]...", language or "auto")
         start = time.time()
 
         result = await asyncio.get_running_loop().run_in_executor(
             executor,
             run_transcribe,
             path_for_transcribe,
-            language
         )
 
         elapsed = time.time() - start
