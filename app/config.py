@@ -19,7 +19,7 @@ class TranscribeConfig:
     task: str = "transcribe"
 
     # sampling-related options
-    temperature = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+    temperature = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
     best_of: int = 10  # number of independent sample trajectories, if t > 0
     beam_size: int = 5  # number of beams in beam search
     patience: float = 2.0  # patience in beam search

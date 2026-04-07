@@ -4,8 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from dependencies import get_config
-from routers import transcribe
-from routers import health
+from routers import transcribe, health
 
 logging.basicConfig(
     level=logging.INFO,

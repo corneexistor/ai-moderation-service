@@ -68,11 +68,6 @@ class WhisperService:
 
         # Converting transcribe config object into dictionary to pass into then function
         options = asdict(self.transcribe_config)
-
-        # For some reason when trying to pass transcribe config value
-        # the actual value type in function arguments turns out to be type of tuple[tuple[float, ...]]
-        # Because of this behavior dictionary value needs to be hardcoded
-        options["temperature"] = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
         options["language"] = lang
 
         result = self.model.transcribe(
