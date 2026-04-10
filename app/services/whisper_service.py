@@ -1,12 +1,11 @@
 import logging
 from dataclasses import asdict
-from typing import Optional
 
 import numpy as np
-import torch
-import whisper
+from faster_whisper import WhisperModel, decode_audio
 
 from config import ModelConfig, TranscribeConfig
+from models.transcribe_result import TranscribeResult, MiniSegment
 
 logger = logging.getLogger(__name__)
 
@@ -17,25 +16,27 @@ class WhisperService:
         self.model = self._load_model()
 
     def _load_model(self):
-        logger.info(
-            "Loading model %s on %s...",
-            self.model_config.model_size.upper(),
-            self.model_config.device.upper()
+        compute_type = (
+            "float16"
+            if self.model_config.device == "cuda" and self.model_config.use_fp16
+            else "float32"
         )
 
-        model = whisper.load_model(
+        logger.info(
+            "Loading model %s on %s (compute type: %s)...",
+            self.model_config.model_size.upper(),
+            self.model_config.device.upper(),
+            compute_type
+        )
+
+        model = WhisperModel(
             self.model_config.model_size,
             device=self.model_config.device,
-            in_memory=self.model_config.in_memory,
+            compute_type=compute_type,
         )
 
         if self.model_config.device == "cuda":
-            if self.model_config.use_fp16:
-                model = model.half()
-            model.eval()
-            torch.set_grad_enabled(False)
-            torch.cuda.empty_cache()
-
+            import torch
             logger.info(
                 "Model loaded. GPU memory: %.1f / %.1f GB",
                 torch.cuda.memory_allocated(0) / 1e9,
@@ -44,50 +45,39 @@ class WhisperService:
 
         return model
 
-    def detect_language(self, file_path: str) -> Optional[str]:
-        try:
-            audio = whisper.load_audio(file_path)
-            audio = whisper.pad_or_trim(audio)
-
-            mel = whisper.log_mel_spectrogram(
-                audio,
-                n_mels=128 if self.model_config.model_size == "large" else 80,
-                device=self.model_config.device,
-            ).to(self.model_config.device)
-
-            _, probs = self.model.detect_language(mel=mel)
-            lang = max(probs, key=probs.get)
-            logger.info("Detected language: %s (p=%.2f)", lang, probs[lang])
-            return lang
-        except Exception as e:
-            logger.warning("Language detection failed: %s", e)
-            return None
-
-    def run_transcribe(self, file_path: str) -> dict:
-        lang = self.detect_language(file_path)
-
+    def run_transcribe(self, file_path: str) -> TranscribeResult:
         # Converting transcribe config object into dictionary to pass into then function
         options = asdict(self.transcribe_config)
-        options["language"] = lang
 
-        result = self.model.transcribe(
+        segments_generator, info = self.model.transcribe(
             audio=file_path,
             **options,
         )
 
-        detected_language = result.get("language") or lang
-        segments = result.get("segments", [])
+        # Exponential sum for confidence calculation
+        exp_sum = 0.0
+        size = 0
 
-        return {
-            "text": result["text"].strip(),
-            "language": detected_language,
-            "segments": segments,
-            "confidence": self._confidence(segments)
-        }
+        # Partial segments objects for response
+        segments: list[MiniSegment] = []
+        for segment in segments_generator:
+            logger.info(f"[{segment.start:.2f}s -> {segment.end:.2f}s] {segment.text}")
 
-    @staticmethod
-    def _confidence(segments: list) -> float:
-        # Calculating response confidence by calculating arithmetic mean of all scores
-        # Exponential function used to convert logarithmic probability back to normal value between 0 and 1
-        scores = [np.exp(s["avg_logprob"]) for s in segments if "avg_logprob" in s]
-        return float(np.mean(scores)) if scores else 0.0
+            segments.append(MiniSegment(
+                start = segment.start,
+                end = segment.end,
+                text = segment.text,
+            ))
+
+            # Exponential function used to convert logarithmic probability back to normal value between 0 and 1
+            exp_sum += np.exp(segment.avg_logprob)
+            size += 1
+
+        confidence = exp_sum / size
+
+        return TranscribeResult(
+            language = info.language,
+            segments = segments,
+            confidence = confidence,
+            duration = info.duration,
+        )

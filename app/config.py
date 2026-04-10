@@ -14,27 +14,23 @@ class ModelConfig:
 @dataclass(frozen=True)
 class TranscribeConfig:
     # implementation details
-    fp16: bool  # use fp16 for most of the calculation
-
     task: str = "transcribe"
 
     # sampling-related options
-    temperature = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+    temperature: Tuple[float, ...] = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
     best_of: int = 10  # number of independent sample trajectories, if t > 0
     beam_size: int = 5  # number of beams in beam search
     patience: float = 2.0  # patience in beam search
 
     # hallucination options
     compression_ratio_threshold: float = 2.6
-    logprob_threshold: float = -1.5
+    log_prob_threshold: float = -1.5
     no_speech_threshold: float = 0.6
     hallucination_silence_threshold: float = 2.0
     condition_on_previous_text: bool = False
 
     word_timestamps: bool = True
     append_punctuations: str =  "\"'.。,，!！?？:：)]}、"
-
-    verbose: bool = False
 
 
 @dataclass(frozen=True)

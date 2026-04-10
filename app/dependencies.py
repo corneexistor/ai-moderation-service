@@ -6,7 +6,7 @@ from services.whisper_service import WhisperService
 from utils.device import setup_device
 
 model_config = ModelConfig(*setup_device())
-transcribe_config = TranscribeConfig(fp16=model_config.use_fp16)
+transcribe_config = TranscribeConfig()
 
 num_workers = 2 if model_config.device == "gpu" else 1
 api_config = ApiConfig(temp_dir=tempfile.mkdtemp(), num_workers=num_workers)
