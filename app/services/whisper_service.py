@@ -2,7 +2,7 @@ import logging
 from dataclasses import asdict
 
 import numpy as np
-from faster_whisper import WhisperModel, decode_audio
+from faster_whisper import WhisperModel
 
 from config import ModelConfig, TranscribeConfig
 from models.transcribe_result import TranscribeResult, MiniSegment
@@ -34,14 +34,6 @@ class WhisperService:
             device=self.model_config.device,
             compute_type=compute_type,
         )
-
-        if self.model_config.device == "cuda":
-            import torch
-            logger.info(
-                "Model loaded. GPU memory: %.1f / %.1f GB",
-                torch.cuda.memory_allocated(0) / 1e9,
-                torch.cuda.get_device_properties(0).total_memory / 1e9
-            )
 
         return model
 

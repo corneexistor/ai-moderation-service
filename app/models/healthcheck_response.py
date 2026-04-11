@@ -1,6 +1,6 @@
 from typing import Optional
+from dataclasses import dataclass
 
-from pydantic.dataclasses import dataclass
 
 @dataclass(frozen=True)
 class GpuInfo:

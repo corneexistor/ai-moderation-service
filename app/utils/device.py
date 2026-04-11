@@ -1,32 +1,86 @@
 import logging
+import sys
+import platform
+from typing import Optional
 
-import torch
+from pynvml import (
+    nvmlInit,
+    nvmlDeviceGetCount,
+    nvmlDeviceGetHandleByIndex,
+    nvmlDeviceGetMemoryInfo,
+    nvmlDeviceGetName,
+    nvmlShutdown,
+    NVMLError,
+)
+
+from models.healthcheck_response import GpuInfo
 
 logger = logging.getLogger(__name__)
 
 def setup_device() -> tuple[str, str, bool]:
-    if torch.cuda.is_available():
-        gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1e9
-        logger.info("GPU: %s (%.1f GB)", torch.cuda.get_device_name(0), gpu_memory)
+    # Check for Nvidia GPU with pynvml
+    try:
+        nvmlInit()
+        device_count = nvmlDeviceGetCount()
+        if device_count > 0:
+            handle = nvmlDeviceGetHandleByIndex(0)
+            mem_info = nvmlDeviceGetMemoryInfo(handle)
+            gpu_name = nvmlDeviceGetName(handle)
+            gpu_memory_gb = mem_info.total / 1e9
 
-        torch.backends.cudnn.benchmark = True
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
+            logger.info("GPU: %s (%.1f GB)", gpu_name, gpu_memory_gb)
 
-        if gpu_memory >= 8:
-            model_size = "large"
-        elif gpu_memory >= 6:
-            model_size = "medium"
-        elif gpu_memory >= 4:
-            model_size = "small"
-        else:
-            model_size = "base"
+            # Determine model size based on VRAM
+            if gpu_memory_gb >= 8:
+                model_size = "large"
+            elif gpu_memory_gb >= 6:
+                model_size = "medium"
+            elif gpu_memory_gb >= 4:
+                model_size = "small"
+            else:
+                model_size = "base"
 
-        return "cuda", model_size, True
+            nvmlShutdown()
+            return "cuda", model_size, True
+        nvmlShutdown()
+    except NVMLError as e:
+        logger.debug("NVIDIA GPU not detected via pynvml: %s", e)
 
-    if torch.backends.mps.is_available():
+    # Check for Apple MPS (Apple Silicon macOS)
+    if sys.platform == "darwin" and platform.machine() == "arm64":
         logger.info("Device: Apple MPS")
         return "mps", "medium", False
 
+    # Fallback to CPU
     logger.info("Device: CPU")
     return "cpu", "base", False
+
+def get_cpu_info() -> Optional[GpuInfo]:
+    try:
+        nvmlInit()
+        handle = nvmlDeviceGetHandleByIndex(0)
+        name = nvmlDeviceGetName(handle)
+        mem = nvmlDeviceGetMemoryInfo(handle)
+        return GpuInfo(
+            name=name,
+            memory_total_gb=mem.total,
+            memory_used_gb=mem.used,
+            memory_free_gb=mem.free,
+        )
+    except NVMLError:
+        return None
+    finally:
+        try:
+            nvmlShutdown()
+        except NVMLError:
+            pass
+
+def get_cuda_version() -> Optional[str]:
+    try:
+        nvmlInit()
+        from pynvml import nvmlSystemGetDriverVersion
+        version = nvmlSystemGetDriverVersion()
+        nvmlShutdown()
+        return version.decode() if isinstance(version, bytes) else version
+    except:
+        return None
