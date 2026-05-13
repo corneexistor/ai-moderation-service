@@ -2,7 +2,6 @@ import logging
 import sys
 import platform
 from typing import Optional
-
 from pynvml import (
     nvmlInit,
     nvmlDeviceGetCount,
@@ -12,13 +11,11 @@ from pynvml import (
     nvmlShutdown,
     NVMLError,
 )
-
 from models.healthcheck_response import GpuInfo
 
 logger = logging.getLogger(__name__)
 
 def setup_device() -> tuple[str, str, bool]:
-    # Check for Nvidia GPU with pynvml
     try:
         nvmlInit()
         device_count = nvmlDeviceGetCount()
@@ -27,33 +24,25 @@ def setup_device() -> tuple[str, str, bool]:
             mem_info = nvmlDeviceGetMemoryInfo(handle)
             gpu_name = nvmlDeviceGetName(handle)
             gpu_memory_gb = mem_info.total / 1e9
-
             logger.info("GPU: %s (%.1f GB)", gpu_name, gpu_memory_gb)
-
-            # Determine model size based on VRAM
-            if gpu_memory_gb >= 8:
-                model_size = "large"
-            elif gpu_memory_gb >= 6:
-                model_size = "medium"
+            if gpu_memory_gb >= 6:
+                model_size = "large-v3"
             elif gpu_memory_gb >= 4:
-                model_size = "small"
+                model_size = "medium"
             else:
-                model_size = "base"
-
+                model_size = "small"
             nvmlShutdown()
             return "cuda", model_size, True
         nvmlShutdown()
     except NVMLError as e:
         logger.debug("NVIDIA GPU not detected via pynvml: %s", e)
 
-    # Check for Apple MPS (Apple Silicon macOS)
     if sys.platform == "darwin" and platform.machine() == "arm64":
         logger.info("Device: Apple MPS")
-        return "mps", "medium", False
+        return "mps", "large-v3", False
 
-    # Fallback to CPU
     logger.info("Device: CPU")
-    return "cpu", "base", False
+    return "cpu", "large-v3", False
 
 def get_cpu_info() -> Optional[GpuInfo]:
     try:
