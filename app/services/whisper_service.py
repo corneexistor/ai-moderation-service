@@ -44,11 +44,13 @@ class WhisperService:
         segments_generator, info = self.model.transcribe(
             audio=file_path,
             **options,
+
         )
 
         # Exponential sum for confidence calculation
         exp_sum = 0.0
         size = 0
+        segments: list[MiniSegment] = []
 
         # Partial segments objects for response
         segments: list[MiniSegment] = []
